@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Hardhat
+cache/
+artifacts/
+typechain/
+typechain-types/
+
+# Hardhat Gas Reporter
+gas-report.txt
+
+# Coverage
+coverage/
+coverage.json
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor directories and files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
