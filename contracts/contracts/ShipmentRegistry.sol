@@ -23,19 +23,18 @@ contract ShipmentRegistry is AccessControl {
     }
 
     // Structs
+    // Structs
     struct Shipment {
-        bytes32 shipmentId;
-        address sender;
-        address carrierAddress;
-
-        bytes32 specHash;
-        string specIPFSCID;
-
-        uint8 currentStatus;
-        uint256 createdAt;
-        uint256 estimatedDelivery;
-
-        bool isAuthentic;
+        bytes32 shipmentId;      // Slot 0
+        bytes32 specHash;        // Slot 1
+        bytes32 specIPFSHash;    // Slot 2
+        address sender;          // Slot 3 (20 bytes)
+        address carrierAddress;  // Slot 4 (20 bytes)
+        uint40 createdAt;        // Slot 3 (5 bytes)
+        uint40 estimatedDelivery;// Slot 3 (5 bytes)
+        uint8 currentStatus;     // Slot 3 (1 byte)
+        bool isAuthentic;        // Slot 3 (1 byte)
+        // Total bytes in Slot 3: 20 + 5 + 5 + 1 + 1 = 32 bytes. Fits perfectly.
     }
 
     mapping(bytes32 => Shipment) public shipments;
@@ -67,8 +66,8 @@ contract ShipmentRegistry is AccessControl {
         bytes32 shipmentId,
         address carrier,
         bytes32 specHash,
-        string memory specIPFSCID,
-        uint256 estimatedDelivery
+        bytes32 specIPFSHash,
+        uint40 estimatedDelivery
     ) external onlyRole(PACKAGING_STAFF_ROLE) {
         if (shipments[shipmentId].createdAt != 0) {
             revert ShipmentAlreadyExists();
@@ -79,9 +78,9 @@ contract ShipmentRegistry is AccessControl {
             sender: msg.sender,
             carrierAddress: carrier,
             specHash: specHash,
-            specIPFSCID: specIPFSCID,
+            specIPFSHash: specIPFSHash,
             currentStatus: uint8(Status.Created),
-            createdAt: block.timestamp,
+            createdAt: uint40(block.timestamp),
             estimatedDelivery: estimatedDelivery,
             isAuthentic: false
         });

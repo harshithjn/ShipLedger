@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("ShipmentRegistry", function () {
+describe("ShipmentRegistry Comprehensive Tests", function () {
   let ShipmentRegistry;
   let shipmentRegistry;
   let owner;
@@ -14,132 +14,186 @@ describe("ShipmentRegistry", function () {
 
   const shipmentId = ethers.keccak256(ethers.toUtf8Bytes("shipment123"));
   const specHash = ethers.keccak256(ethers.toUtf8Bytes("specifications"));
-  const specIPFSCID = "QmPChv5d5G...CID";
+  const specIPFSHash = ethers.keccak256(ethers.toUtf8Bytes("QmPChv5d5G...CID"));
   const estimatedDelivery = Math.floor(Date.now() / 1000) + 86400;
+
+  // Status Enum mapping
+  const Status = {
+    Created: 0,
+    Packaged: 1,
+    Verified: 2,
+    PickedUp: 3,
+    InTransit: 4,
+    Delivered: 5
+  };
 
   beforeEach(async function () {
     [owner, packagingStaff, carrier, otherAccount] = await ethers.getSigners();
     ShipmentRegistry = await ethers.getContractFactory("ShipmentRegistry");
     shipmentRegistry = await ShipmentRegistry.deploy();
 
-    // Assign roles
     await shipmentRegistry.grantRole(PACKAGING_STAFF_ROLE, packagingStaff.address);
     await shipmentRegistry.grantRole(CARRIER_ROLE, carrier.address);
   });
 
-  describe("createShipment", function () {
-    it("Should allow packaging staff to create a shipment", async function () {
+  describe("1. createShipment()", function () {
+    it("Success: Should allow packaging staff to create a shipment", async function () {
       await expect(shipmentRegistry.connect(packagingStaff).createShipment(
         shipmentId,
         carrier.address,
         specHash,
-        specIPFSCID,
+        specIPFSHash,
         estimatedDelivery
       )).to.emit(shipmentRegistry, "ShipmentCreated")
         .withArgs(shipmentId, packagingStaff.address);
 
-      const shipment = await shipmentRegistry.getShipment(shipmentId);
-      expect(shipment.shipmentId).to.equal(shipmentId);
-      expect(shipment.sender).to.equal(packagingStaff.address);
-      expect(shipment.currentStatus).to.equal(0); // Created
+      const s = await shipmentRegistry.getShipment(shipmentId);
+      expect(s.shipmentId).to.equal(shipmentId);
+      expect(s.sender).to.equal(packagingStaff.address);
+      expect(s.carrierAddress).to.equal(carrier.address);
+      expect(s.specHash).to.equal(specHash);
+      expect(s.specIPFSHash).to.equal(specIPFSHash);
+      expect(s.currentStatus).to.equal(Status.Created);
+      expect(s.isAuthentic).to.be.false;
     });
 
-    it("Should fail if called by non-packaging staff", async function () {
-      await expect(shipmentRegistry.connect(otherAccount).createShipment(
-        shipmentId,
-        carrier.address,
-        specHash,
-        specIPFSCID,
-        estimatedDelivery
+    it("Failure: Unauthorized user (owner) cannot create shipment", async function () {
+      await expect(shipmentRegistry.connect(owner).createShipment(
+        shipmentId, carrier.address, specHash, specIPFSHash, estimatedDelivery
       )).to.be.revertedWithCustomError(shipmentRegistry, "AccessControlUnauthorizedAccount");
     });
 
-    it("Should fail if shipmentId already exists", async function () {
-      await shipmentRegistry.connect(packagingStaff).createShipment(
-        shipmentId,
-        carrier.address,
-        specHash,
-        specIPFSCID,
-        estimatedDelivery
-      );
+    it("Failure: Carrier cannot create shipment", async function () {
+      await expect(shipmentRegistry.connect(carrier).createShipment(
+        shipmentId, carrier.address, specHash, specIPFSHash, estimatedDelivery
+      )).to.be.revertedWithCustomError(shipmentRegistry, "AccessControlUnauthorizedAccount");
+    });
 
+    it("Failure: Duplicate shipmentId", async function () {
+      await shipmentRegistry.connect(packagingStaff).createShipment(
+        shipmentId, carrier.address, specHash, specIPFSHash, estimatedDelivery
+      );
       await expect(shipmentRegistry.connect(packagingStaff).createShipment(
-        shipmentId,
-        carrier.address,
-        specHash,
-        specIPFSCID,
-        estimatedDelivery
+        shipmentId, carrier.address, specHash, specIPFSHash, estimatedDelivery
       )).to.be.revertedWithCustomError(shipmentRegistry, "ShipmentAlreadyExists");
     });
   });
 
-  describe("verifyShipment", function () {
-    this.beforeEach(async function () {
+  describe("2. verifyShipment()", function () {
+    beforeEach(async function () {
       await shipmentRegistry.connect(packagingStaff).createShipment(
-        shipmentId,
-        carrier.address,
-        specHash,
-        specIPFSCID,
-        estimatedDelivery
+        shipmentId, carrier.address, specHash, specIPFSHash, estimatedDelivery
       );
     });
 
-    it("Should verify shipment with correct hash", async function () {
+    it("Success: Verify with correct hash", async function () {
       await expect(shipmentRegistry.verifyShipment(shipmentId, specHash))
         .to.emit(shipmentRegistry, "ShipmentVerified")
-        .withArgs(shipmentId, any); // Use custom matcher or check below
+        .to.emit(shipmentRegistry, "StatusUpdated")
+        .withArgs(shipmentId, Status.Verified, (val) => true);
 
-      const shipment = await shipmentRegistry.getShipment(shipmentId);
-      expect(shipment.isAuthentic).to.be.true;
-      expect(shipment.currentStatus).to.equal(2); // Verified
+      const s = await shipmentRegistry.getShipment(shipmentId);
+      expect(s.isAuthentic).to.be.true;
+      expect(s.currentStatus).to.equal(Status.Verified);
     });
 
-    it("Should fail with incorrect hash", async function () {
+    it("Failure: Wrong hash", async function () {
       const wrongHash = ethers.keccak256(ethers.toUtf8Bytes("wrong"));
       await expect(shipmentRegistry.verifyShipment(shipmentId, wrongHash))
         .to.be.revertedWithCustomError(shipmentRegistry, "InvalidHash");
     });
+
+    it("Failure: Non-existent shipment", async function () {
+      const ghostId = ethers.keccak256(ethers.toUtf8Bytes("ghost"));
+      await expect(shipmentRegistry.verifyShipment(ghostId, specHash))
+        .to.be.revertedWithCustomError(shipmentRegistry, "ShipmentNotFound");
+    });
+
+    it("Idempotency: Calling verifyShipment again", async function () {
+        await shipmentRegistry.verifyShipment(shipmentId, specHash);
+        // Second call should still work as it sets isAuthentic=true and currentStatus=Verified
+        // But if the transition logic in verifyShipment says `shipment.currentStatus > uint8(Status.Verified)` revert
+        // Then it should BE fine because Verified is not > Verified.
+        await expect(shipmentRegistry.verifyShipment(shipmentId, specHash))
+            .to.emit(shipmentRegistry, "ShipmentVerified");
+    });
+
+    it("Failure: Verify after higher status (e.g. Delivered)", async function () {
+        // Move to Packaged
+        await shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Packaged);
+        // Move to Verified (via verify)
+        await shipmentRegistry.verifyShipment(shipmentId, specHash);
+        // Move to PickedUp
+        await shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.PickedUp);
+        
+        // Now try to verify again - should fail because status is now PickedUp (3) > Verified (2)
+        await expect(shipmentRegistry.verifyShipment(shipmentId, specHash))
+            .to.be.revertedWithCustomError(shipmentRegistry, "InvalidStatusTransition");
+    });
   });
 
-  describe("updateStatus", function () {
-    this.beforeEach(async function () {
+  describe("3. updateStatus()", function () {
+    beforeEach(async function () {
       await shipmentRegistry.connect(packagingStaff).createShipment(
-        shipmentId,
-        carrier.address,
-        specHash,
-        specIPFSCID,
-        estimatedDelivery
+        shipmentId, carrier.address, specHash, specIPFSHash, estimatedDelivery
       );
     });
 
-    it("Should allow carrier to update status sequentially", async function () {
+    it("Success: Full sequential flow", async function () {
       // Created -> Packaged
-      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, 1))
-        .to.emit(shipmentRegistry, "StatusUpdated")
-        .withArgs(shipmentId, 1, any);
-
-      // Packaged -> Verified
-      // Note: VerifyShipment also updates status to 2.
+      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Packaged))
+        .to.emit(shipmentRegistry, "StatusUpdated").withArgs(shipmentId, Status.Packaged, (v) => true);
+      
+      // Packaged -> Verified (Via verifyShipment)
       await shipmentRegistry.verifyShipment(shipmentId, specHash);
-
+      
       // Verified -> PickedUp
-      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, 3))
-        .to.emit(shipmentRegistry, "StatusUpdated")
-        .withArgs(shipmentId, 3, any);
+      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.PickedUp))
+        .to.emit(shipmentRegistry, "StatusUpdated").withArgs(shipmentId, Status.PickedUp, (v) => true);
+        
+      // PickedUp -> InTransit
+      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.InTransit))
+        .to.emit(shipmentRegistry, "StatusUpdated").withArgs(shipmentId, Status.InTransit, (v) => true);
+        
+      // InTransit -> Delivered
+      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Delivered))
+        .to.emit(shipmentRegistry, "StatusUpdated").withArgs(shipmentId, Status.Delivered, (v) => true);
     });
 
-    it("Should fail if status transition skips steps", async function () {
-      // Created -> Verified (skipping Packaged)
-      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, 2))
+    it("Failure: Skip status (Created -> Verified)", async function () {
+      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Verified))
         .to.be.revertedWithCustomError(shipmentRegistry, "InvalidStatusTransition");
     });
 
-    it("Should fail if caller is not the carrier", async function () {
-        await expect(shipmentRegistry.connect(otherAccount).updateStatus(shipmentId, 1))
-        .to.be.revertedWithCustomError(shipmentRegistry, "AccessControlUnauthorizedAccount");
+    it("Failure: Repeat status (Packaged -> Packaged)", async function () {
+      await shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Packaged);
+      await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Packaged))
+        .to.be.revertedWithCustomError(shipmentRegistry, "InvalidStatusTransition");
+    });
+
+    it("Failure: Backward status (Packaged -> Created)", async function () {
+        await shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Packaged);
+        await expect(shipmentRegistry.connect(carrier).updateStatus(shipmentId, Status.Created))
+          .to.be.revertedWithCustomError(shipmentRegistry, "InvalidStatusTransition");
+    });
+
+    it("Failure: Unauthorized role (Packaging Staff)", async function () {
+        await expect(shipmentRegistry.connect(packagingStaff).updateStatus(shipmentId, Status.Packaged))
+          .to.be.revertedWithCustomError(shipmentRegistry, "AccessControlUnauthorizedAccount");
+    });
+
+    it("Failure: Non-existent shipment", async function () {
+        const ghostId = ethers.keccak256(ethers.toUtf8Bytes("ghost"));
+        await expect(shipmentRegistry.connect(carrier).updateStatus(ghostId, Status.Packaged))
+          .to.be.revertedWithCustomError(shipmentRegistry, "ShipmentNotFound");
     });
   });
-});
 
-// Helper for 'any' matcher in ethers v6 if needed, or just focus on other args.
-const any = (val) => true;
+  describe("4. getShipment()", function () {
+      it("Failure: Non-existent shipment", async function () {
+        const ghostId = ethers.keccak256(ethers.toUtf8Bytes("ghost"));
+        await expect(shipmentRegistry.getShipment(ghostId))
+          .to.be.revertedWithCustomError(shipmentRegistry, "ShipmentNotFound");
+      });
+  });
+});
