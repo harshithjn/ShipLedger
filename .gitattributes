@@ -1,0 +1,12 @@
+# Ignore frontend and configuration languages in GitHub statistics
+*.js linguist-detectable=false
+*.jsx linguist-detectable=false
+*.ts linguist-detectable=false
+*.tsx linguist-detectable=false
+*.css linguist-detectable=false
+*.html linguist-detectable=false
+*.json linguist-detectable=false
+*.md linguist-detectable=false
+
+# Ensure Solidity is the primary detected language
+*.sol linguist-detectable=true
